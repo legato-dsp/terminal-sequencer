@@ -1,17 +1,25 @@
+use std::error::Error;
+
+use crossterm::event;
+use legato::nodes::control::sequencer::SequencerStep;
 use ratatui::style::Stylize;
 use ratatui::widgets::{Block, Paragraph};
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+struct SequencerState {
+    data: Vec<SequencerStep>,
+}
+
+fn start_ui_thread() -> Result<(), Box<dyn Error>> {
     ratatui::run(|terminal| {
-        terminal.draw(|frame| {
-            let block = Block::bordered().title("Welcome");
-            let greeting = Paragraph::new("Hello, Ratatui! 🐭")
-                .centered()
-                .yellow()
-                .block(block);
-            frame.render_widget(greeting, frame.area());
-        })?;
-        std::thread::sleep(std::time::Duration::from_secs(5));
-        Ok(())
+        loop {
+            terminal.draw(|frame| frame.render_widget("Hello, world!", frame.area()))?;
+            if event::read()?.is_key_press() {
+                break Ok(());
+            }
+        }
     })
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    start_ui_thread()
 }
