@@ -9,8 +9,9 @@ edition = "2024"
 [dependencies]
 color-eyre = "0.6.3"
 crossterm = "0.29.0"
-legato = "0.0.11"
+legato = "0.0.13"
 ratatui = "0.30.0"
+rtrb = "0.3.3"
 
 # Read the optimization guideline for more details: https://ratatui.rs/recipes/apps/release-your-app/#optimizations
 [profile.release]
