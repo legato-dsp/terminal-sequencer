@@ -78,7 +78,12 @@ impl Widget for &mut App {
             .unwrap_or(&-1.0)
             .clamp(-1.0, -0.1);
 
+        let block = ratatui::widgets::Block::bordered()
+            .title(" Waveform ")
+            .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::LightMagenta));
+
         let res = Canvas::default()
+            .block(block)
             .x_bounds([0.0, DISPLAY_SAMPLES as f64])
             .y_bounds([min as f64, max as f64])
             .paint(move |ctx| {
