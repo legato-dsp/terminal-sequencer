@@ -1,9 +1,9 @@
-use std::{collections::VecDeque, f32::consts::TAU};
-
+use ratatui::style::{Color, Style};
+use ratatui::widgets::Block;
+use ratatui::widgets::canvas::{Canvas, Line};
 use ratatui::widgets::{Widget, WidgetRef};
 use realfft::{RealFftPlanner, num_complex::Complex32};
-
-use crate::{DISPLAY_SAMPLES, RING_SIZE};
+use std::{collections::VecDeque, f32::consts::TAU};
 
 const FFT_SIZE: usize = 2048;
 const HOP_SIZE: usize = FFT_SIZE / 4; // TODO, try various resolutions
@@ -51,7 +51,7 @@ impl Spectroscope {
         for (normalized, out) in self
             .spectrum
             .iter()
-            .map(|c| c.norm())
+            .map(|c| c.norm() / (HOP_SIZE / 2) as f32)
             .zip(self.visualization_buffer.iter_mut())
         {
             *out = normalized;
@@ -73,47 +73,90 @@ impl Spectroscope {
     }
 }
 
+fn catmull_rom(p0: f32, p1: f32, p2: f32, p3: f32, t: f32) -> f32 {
+    0.5 * ((2.0 * p1)
+        + (-p0 + p2) * t
+        + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * t * t
+        + (-p0 + 3.0 * p1 - 3.0 * p2 + p3) * t * t * t)
+}
+
+fn catmull_rom_curve(points: &[f32], steps: usize) -> Vec<f32> {
+    let n = points.len();
+    if n < 2 {
+        return points.to_vec();
+    }
+
+    let mut out = Vec::with_capacity((n - 1) * steps + 1);
+    // Maybe upstream this to Legato, legato has nice utils for cubic + linear?
+    // TODO: SIMD?
+    for i in 0..n.saturating_sub(1) {
+        let p0 = points[i.saturating_sub(1)];
+        let p1 = points[i];
+        let p2 = points[(i + 1).min(n - 1)];
+        let p3 = points[(i + 2).min(n - 1)];
+        for step in 0..steps {
+            let t = step as f32 / steps as f32;
+            out.push(catmull_rom(p0, p1, p2, p3, t).clamp(0.0, 1.0));
+        }
+    }
+    out.push(*points.last().unwrap());
+    out
+}
+
 impl WidgetRef for Spectroscope {
     fn render_ref(&self, area: ratatui::prelude::Rect, buf: &mut ratatui::prelude::Buffer) {
-        let block = ratatui::widgets::Block::bordered()
-            .title(" Spectrum ")
-            .border_style(ratatui::style::Style::default().fg(ratatui::style::Color::LightCyan));
-
-        // Reserve the inner area for the bars, matching Oscilloscope's canvas inset
-        let inner = block.inner(area);
-        block.render(area, buf);
-
         let num_bins = self.visualization_buffer.len();
-        let width = inner.width as usize;
-        let height = inner.height as usize;
+        let num_cols = area.width as usize;
 
-        for col in 0..width {
-            let t = col as f32 / width as f32;
-            let bin = ((num_bins as f32).powf(t)) as usize;
-            let bin = bin.min(num_bins - 1);
+        // One control point per character column, log-spaced over the bin array
+        let control_points: Vec<f32> = (0..num_cols)
+            .map(|col| {
+                let t = col as f32 / num_cols as f32;
+                let bin = ((num_bins as f32).powf(t)) as usize;
+                let bin = bin.min(num_bins - 1);
+                let magnitude = self.visualization_buffer[bin];
+                const DB_FLOOR: f32 = -80.0;
+                let db = if magnitude > 0.0 {
+                    20.0 * magnitude.log10()
+                } else {
+                    DB_FLOOR
+                };
+                ((db - DB_FLOOR) / -DB_FLOOR).clamp(0.0, 1.0)
+            })
+            .collect();
 
-            let magnitude = self.visualization_buffer[bin];
+        // Upsample 2x
+        let curve = catmull_rom_curve(&control_points, 2);
+        let curve_len = curve.len();
 
-            const DB_FLOOR: f32 = -80.0;
-            const DB_SCALE: f32 = 1.0 / -DB_FLOOR;
-            let db = if magnitude > 0.0 {
-                20.0 * magnitude.log10()
-            } else {
-                DB_FLOOR
-            };
-            let normalized = ((db - DB_FLOOR) * DB_SCALE).clamp(0.0, 1.0);
-            let filled_rows = (normalized * height as f32).round() as usize;
+        let block = Block::bordered()
+            .title(" Spectrum ")
+            .border_style(Style::default().fg(Color::LightCyan));
 
-            for row in 0..height {
-                let is_filled = row >= height - filled_rows;
-                if is_filled {
-                    let x = inner.left() + col as u16;
-                    let y = inner.top() + row as u16;
-                    if let Some(cell) = buf.cell_mut((x, y)) {
-                        cell.set_char('█').set_fg(ratatui::style::Color::Cyan);
-                    }
+        let canvas = Canvas::default()
+            .block(block)
+            .x_bounds([0.0, curve_len as f64])
+            .y_bounds([0.0, 1.0])
+            .paint(move |ctx| {
+                for i in 0..curve_len.saturating_sub(1) {
+                    // Fill first so the Cyan curve line overwrites it at the peak
+                    ctx.draw(&Line {
+                        x1: i as f64,
+                        y1: 0.0,
+                        x2: i as f64,
+                        y2: curve[i] as f64,
+                        color: Color::Cyan,
+                    });
+                    ctx.draw(&Line {
+                        x1: i as f64,
+                        y1: curve[i] as f64,
+                        x2: (i + 1) as f64,
+                        y2: curve[i + 1] as f64,
+                        color: Color::LightCyan,
+                    });
                 }
-            }
-        }
+            });
+
+        canvas.render(area, buf);
     }
 }
