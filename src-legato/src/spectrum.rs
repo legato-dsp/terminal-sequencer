@@ -139,7 +139,6 @@ impl WidgetRef for Spectroscope {
             .y_bounds([0.0, 1.0])
             .paint(move |ctx| {
                 for i in 0..curve_len.saturating_sub(1) {
-                    // Fill first so the Cyan curve line overwrites it at the peak
                     ctx.draw(&Line {
                         x1: i as f64,
                         y1: 0.0,
