@@ -15,12 +15,14 @@ use legato::{
 };
 use ratatui::DefaultTerminal;
 use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::widgets::{Widget, WidgetRef};
 
 use crate::osc::Oscilloscope;
+use crate::spectrum::Spectroscope;
 
 mod osc;
+mod spectrum;
 
 pub const RING_SIZE: usize = 4096;
 pub const DISPLAY_SAMPLES: usize = 512;
@@ -31,6 +33,7 @@ struct App {
     // A second ring buffer to pull samples into so we can visualize
     visualization_ring: VecDeque<f32>,
     oscilloscope: Oscilloscope,
+    spectroscope: Spectroscope,
 }
 
 impl App {
@@ -39,6 +42,7 @@ impl App {
             consumer,
             visualization_ring: VecDeque::from(vec![0.0; RING_SIZE]),
             oscilloscope: Oscilloscope::default(),
+            spectroscope: Spectroscope::new(),
         }
     }
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
@@ -64,8 +68,15 @@ impl Widget for &mut App {
         let samples = self.visualization_ring.make_contiguous();
 
         self.oscilloscope.update(samples);
+        self.spectroscope.update(samples);
 
-        self.oscilloscope.render_ref(area, buf);
+        let [osc_area, spec_area] = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
+            .areas(area);
+
+        self.oscilloscope.render_ref(osc_area, buf);
+        self.spectroscope.render_ref(spec_area, buf);
     }
 }
 
