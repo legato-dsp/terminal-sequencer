@@ -9,7 +9,7 @@ edition = "2024"
 [dependencies]
 color-eyre = "0.6.3"
 crossterm = "0.29.0"
-legato = "0.0.13"
+legato = "0.0.15"
 ratatui = { version = "0.30.0", features = ["unstable-widget-ref"] }
 realfft = "3.5.0"
 rtrb = "0.3.3"

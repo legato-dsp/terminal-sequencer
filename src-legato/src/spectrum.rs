@@ -3,7 +3,7 @@ use ratatui::widgets::Block;
 use ratatui::widgets::canvas::{Canvas, Line};
 use ratatui::widgets::{Widget, WidgetRef};
 use realfft::{RealFftPlanner, num_complex::Complex32};
-use std::{collections::VecDeque, f32::consts::TAU};
+use std::f32::consts::TAU;
 
 const FFT_SIZE: usize = 2048;
 const HOP_SIZE: usize = FFT_SIZE / 4; // TODO, try various resolutions
@@ -25,7 +25,6 @@ pub struct Spectroscope {
     windowed_samples: [f32; HOP_SIZE],
     // The spectrum we right to
     spectrum: Box<[Complex32]>,
-    ring: VecDeque<f32>,
     window: Box<[f32]>,
 }
 
@@ -36,7 +35,6 @@ impl Spectroscope {
             visualization_buffer: [0.0; HOP_SIZE / 2 + 1],
             windowed_samples: [0.0; HOP_SIZE],
             spectrum: vec![Complex32::default(); HOP_SIZE / 2 + 1].into(),
-            ring: VecDeque::with_capacity(FFT_SIZE * 4),
             window: hann(HOP_SIZE),
         }
     }
