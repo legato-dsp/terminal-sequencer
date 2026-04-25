@@ -5,10 +5,17 @@ use ratatui::{
     widgets::{Block, Borders, Cell, Row, StatefulWidget, Table, TableState, Widget},
 };
 
+/// The backend pre-allocates this many steps; we never go above it.
+pub const MAX_STEPS: usize = 256;
+
 // Classic tracker note names: natural notes padded with '-' so every name is 2 chars.
 const NOTE_NAMES: &[&str] = &[
     "C-", "C#", "D-", "D#", "E-", "F-", "F#", "G-", "G#", "A-", "A#", "B-",
 ];
+
+// ---------------------------------------------------------------------------
+// Data
+// ---------------------------------------------------------------------------
 
 #[derive(Clone, Debug)]
 pub struct TrackerStep {
@@ -61,43 +68,59 @@ impl Column {
 // Pitch helpers
 // ---------------------------------------------------------------------------
 
-pub fn ftom(freq: f32) -> i32 {
+/// Convert frequency (Hz) to the nearest MIDI note number.
+pub fn freq_to_midi(freq: f32) -> i32 {
     (12.0 * (freq / 440.0).log2() + 69.0).round() as i32
 }
 
-pub fn mtof(midi: i32) -> f32 {
+/// Convert a MIDI note number to frequency (Hz).
+pub fn midi_to_freq(midi: i32) -> f32 {
     440.0 * 2.0_f32.powf((midi as f32 - 69.0) / 12.0)
 }
 
+/// Human-readable note name, e.g. "C-4", "A#3". Width is always 3 chars for
+/// octaves 0–9 (the usable MIDI range) and 4 for the rare octave -1 (MIDI 0–11).
 pub fn freq_to_note_display(freq: f32) -> String {
-    let midi = ftom(freq).clamp(0, 127);
+    let midi = freq_to_midi(freq).clamp(0, 127);
     let octave = (midi / 12) - 1;
     let idx = (midi % 12) as usize;
     format!("{}{}", NOTE_NAMES[idx], octave)
 }
 
+// ---------------------------------------------------------------------------
+// Tracker state
+// ---------------------------------------------------------------------------
+
 pub struct Tracker {
+    /// Full preallocated buffer — always MAX_STEPS long.
     pub steps: Vec<TrackerStep>,
+    /// How many steps the sequencer currently plays (1 – MAX_STEPS).
+    pub active_steps: usize,
     pub cursor_row: usize,
     pub cursor_col: Column,
+    /// Kept in sync with cursor_row so the Table widget scrolls automatically.
     pub table_state: TableState,
 }
 
 impl Tracker {
-    pub fn new(num_steps: usize) -> Self {
+    pub fn new(initial_steps: usize) -> Self {
+        let active_steps = initial_steps.clamp(1, MAX_STEPS);
         let mut table_state = TableState::default();
         table_state.select(Some(0));
         Self {
-            steps: vec![TrackerStep::default(); num_steps],
+            steps: vec![TrackerStep::default(); MAX_STEPS],
+            active_steps,
             cursor_row: 0,
             cursor_col: Column::Note,
             table_state,
         }
     }
 
+    // --- Navigation ---
+
     pub fn move_up(&mut self) {
         self.cursor_row = if self.cursor_row == 0 {
-            self.steps.len() - 1
+            self.active_steps - 1
         } else {
             self.cursor_row - 1
         };
@@ -105,8 +128,33 @@ impl Tracker {
     }
 
     pub fn move_down(&mut self) {
-        self.cursor_row = (self.cursor_row + 1) % self.steps.len();
+        self.cursor_row = (self.cursor_row + 1) % self.active_steps;
         self.table_state.select(Some(self.cursor_row));
+    }
+
+    // --- Step count ---
+
+    /// Add one step. Returns the new count, or None if already at MAX_STEPS.
+    pub fn grow(&mut self) -> Option<usize> {
+        if self.active_steps >= MAX_STEPS {
+            return None;
+        }
+        self.active_steps += 1;
+        Some(self.active_steps)
+    }
+
+    /// Remove one step. Returns the new count, or None if already at 1.
+    /// Clamps the cursor so it stays inside the active window.
+    pub fn shrink(&mut self) -> Option<usize> {
+        if self.active_steps <= 1 {
+            return None;
+        }
+        self.active_steps -= 1;
+        if self.cursor_row >= self.active_steps {
+            self.cursor_row = self.active_steps - 1;
+            self.table_state.select(Some(self.cursor_row));
+        }
+        Some(self.active_steps)
     }
 
     pub fn move_left(&mut self) {
@@ -116,11 +164,15 @@ impl Tracker {
         self.cursor_col = self.cursor_col.next();
     }
 
-    pub fn increment_cursor(&mut self) -> bool {
+    // --- Editing (all return true so the caller knows to sync the backend) ---
+
+    /// Nudge the focused cell up by one unit.
+    pub fn increment(&mut self) -> bool {
         self.adjust(1)
     }
 
-    pub fn decrement_cursor(&mut self) -> bool {
+    /// Nudge the focused cell down by one unit.
+    pub fn decrement(&mut self) -> bool {
         self.adjust(-1)
     }
 
@@ -130,7 +182,7 @@ impl Tracker {
             return false;
         }
         let step = &mut self.steps[self.cursor_row];
-        step.freq = mtof((ftom(step.freq) + 12).clamp(0, 127));
+        step.freq = midi_to_freq((freq_to_midi(step.freq) + 12).clamp(0, 127));
         true
     }
 
@@ -140,10 +192,11 @@ impl Tracker {
             return false;
         }
         let step = &mut self.steps[self.cursor_row];
-        step.freq = mtof((ftom(step.freq) - 12).clamp(0, 127));
+        step.freq = midi_to_freq((freq_to_midi(step.freq) - 12).clamp(0, 127));
         true
     }
 
+    /// Toggle the gate of the focused step.
     pub fn toggle_gate(&mut self) -> bool {
         let step = &mut self.steps[self.cursor_row];
         step.gate = if step.gate > 0.5 { 0.0 } else { 1.0 };
@@ -154,21 +207,26 @@ impl Tracker {
         &self.steps[self.cursor_row]
     }
 
+    // --- Internal ---
+
     fn adjust(&mut self, dir: i32) -> bool {
         let step = &mut self.steps[self.cursor_row];
         match self.cursor_col {
             Column::Note => {
-                let midi = ftom(step.freq);
-                step.freq = mtof((midi + dir).clamp(0, 127));
+                let midi = freq_to_midi(step.freq);
+                step.freq = midi_to_freq((midi + dir).clamp(0, 127));
             }
             Column::Vel => {
+                // 128 discrete levels (0-127)
                 let raw = (step.vel * 127.0).round() as i32;
                 step.vel = ((raw + dir).clamp(0, 127) as f32) / 127.0;
             }
             Column::Gate => {
+                // +/- both toggle for convenience
                 step.gate = if step.gate > 0.5 { 0.0 } else { 1.0 };
             }
             Column::Len => {
+                // 32 steps of resolution (0.00 – 1.00 in 1/32 increments)
                 let raw = (step.length * 32.0).round() as i32;
                 step.length = ((raw + dir).clamp(0, 32) as f32) / 32.0;
             }
@@ -177,6 +235,11 @@ impl Tracker {
     }
 }
 
+// ---------------------------------------------------------------------------
+// Ratatui widget
+// ---------------------------------------------------------------------------
+
+/// Colour palette – tweak here to restyle the whole tracker.
 mod palette {
     use ratatui::style::Color;
     pub const HEADER_FG: Color = Color::Yellow;
@@ -198,6 +261,7 @@ impl Widget for &mut Tracker {
         let cursor_row = self.cursor_row;
         let cursor_col = self.cursor_col;
 
+        // --- Header ---
         let header = Row::new([
             Cell::from(" # "),
             Cell::from("NOTE "),
@@ -212,13 +276,13 @@ impl Widget for &mut Tracker {
         )
         .height(1);
 
+        // --- Rows ---
         let cursor_style = Style::default()
             .fg(CURSOR_FG)
             .bg(CURSOR_BG)
             .add_modifier(Modifier::BOLD);
 
-        let rows: Vec<Row> = self
-            .steps
+        let rows: Vec<Row> = self.steps[..self.active_steps]
             .iter()
             .enumerate()
             .map(|(i, step)| {
@@ -233,7 +297,7 @@ impl Widget for &mut Tracker {
                     Style::default().fg(ROW_NORMAL_FG)
                 };
 
-                // Highlight cell if it's under the cursor, else use row_base.
+                // Helper: highlight cell if it's under the cursor, else use row_base.
                 let cell = |text: String, col: Column| -> Cell {
                     if is_active && cursor_col == col {
                         Cell::from(text).style(cursor_style)
@@ -270,6 +334,7 @@ impl Widget for &mut Tracker {
                     Cell::from(gate_str).style(row_base)
                 };
 
+                // Length — displayed as a 0.00-1.00 decimal
                 let len_str = format!(" {:.2} ", step.length);
 
                 Row::new(vec![
@@ -283,12 +348,13 @@ impl Widget for &mut Tracker {
             })
             .collect();
 
+        // --- Table ---
         let widths = [
-            Constraint::Length(4),
-            Constraint::Length(5),
-            Constraint::Length(5),
-            Constraint::Length(5),
-            Constraint::Length(6),
+            Constraint::Length(4), // index
+            Constraint::Length(5), // note  (e.g. "C-4  ")
+            Constraint::Length(5), // vel   (e.g. " 7F  ")
+            Constraint::Length(5), // gate  (e.g. "  ON ")
+            Constraint::Length(6), // len   (e.g. " 0.50 ")
         ];
 
         let table = Table::new(rows, widths)
@@ -297,10 +363,14 @@ impl Widget for &mut Tracker {
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::DarkGray))
-                    .title(" ▶  SEQUENCER ")
+                    .title(format!(
+                        " ▶  SEQUENCER  {}/{} ",
+                        self.active_steps, MAX_STEPS
+                    ))
                     .title_style(Style::default().fg(TITLE_FG).add_modifier(Modifier::BOLD)),
             )
-            .row_highlight_style(Style::default())
+            // We do per-cell highlighting ourselves; suppress the built-in row highlight.
+            .highlight_style(Style::default())
             .highlight_symbol("");
 
         StatefulWidget::render(table, area, buf, &mut self.table_state);

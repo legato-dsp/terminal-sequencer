@@ -9,6 +9,7 @@ use legato::LegatoFrontend;
 use legato::interface::AudioInterface;
 use legato::midi::{MidiPortKind, start_midi_thread};
 use legato::msg::StepPayload;
+use legato::msg::{ParamPayload, RtValue};
 use legato::{
     builder::{LegatoBuilder, Unconfigured},
     config::Config,
@@ -17,54 +18,58 @@ use legato::{
 };
 use ratatui::DefaultTerminal;
 use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
-use ratatui::style::{Color, Modifier, Style};
+use ratatui::layout::{Constraint, Direction, Layout, Rect};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Paragraph, Widget, WidgetRef};
 
 use crate::osc::Oscilloscope;
 use crate::spectrum::Spectroscope;
-use crate::tracker::{Column, Tracker, freq_to_note_display, ftom};
+use crate::tracker::{Column, Tracker, freq_to_midi, freq_to_note_display};
 
 mod osc;
 mod spectrum;
 mod tracker;
 
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
 pub const RING_SIZE: usize = 4096;
 pub const DISPLAY_SAMPLES: usize = 512;
-pub const DEFAULT_STEPS: usize = 64;
+pub const DEFAULT_STEPS: usize = 16;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum VisualizationState {
+enum VisMode {
     Both,
     OscOnly,
     SpecOnly,
     Hidden,
 }
 
-impl VisualizationState {
+impl VisMode {
     fn cycle(self) -> Self {
         match self {
-            VisualizationState::Both => VisualizationState::OscOnly,
-            VisualizationState::OscOnly => VisualizationState::SpecOnly,
-            VisualizationState::SpecOnly => VisualizationState::Hidden,
-            VisualizationState::Hidden => VisualizationState::Both,
+            VisMode::Both => VisMode::OscOnly,
+            VisMode::OscOnly => VisMode::SpecOnly,
+            VisMode::SpecOnly => VisMode::Hidden,
+            VisMode::Hidden => VisMode::Both,
         }
     }
 
     fn label(self) -> &'static str {
         match self {
-            VisualizationState::Both => "OSC+SPEC",
-            VisualizationState::OscOnly => "OSC",
-            VisualizationState::SpecOnly => "SPEC",
-            VisualizationState::Hidden => "OFF",
+            VisMode::Both => "OSC+SPEC",
+            VisMode::OscOnly => "OSC",
+            VisMode::SpecOnly => "SPEC",
+            VisMode::Hidden => "OFF",
         }
     }
 
     /// Height (in terminal rows) that the visualizer panel should occupy.
     fn height(self) -> u16 {
         match self {
-            VisualizationState::Hidden => 0,
+            VisMode::Hidden => 0,
             _ => 10,
         }
     }
@@ -80,7 +85,7 @@ struct App {
     frontend: LegatoFrontend,
     // Tracker UI state
     tracker: Tracker,
-    vis_mode: VisualizationState,
+    vis_mode: VisMode,
 }
 
 impl App {
@@ -92,10 +97,11 @@ impl App {
             spectroscope: Spectroscope::new(),
             frontend,
             tracker: Tracker::new(DEFAULT_STEPS),
-            vis_mode: VisualizationState::Both,
+            vis_mode: VisMode::Both,
         }
     }
 
+    /// Draw a frame.
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
         terminal.draw(|frame| {
             frame.render_widget(self, frame.area());
@@ -107,7 +113,7 @@ impl App {
     pub fn sync_step(&mut self, index: usize) {
         let step = &self.tracker.steps[index];
         let _ = self.frontend.send_node_msg(
-            "sequencer",
+            "tracker.sequencer",
             legato::msg::NodeMessage::SetStep(StepPayload {
                 index,
                 freq: Some(step.freq),
@@ -118,13 +124,30 @@ impl App {
         );
     }
 
-    /// Push all steps to the backend
+    /// Push all *active* steps to the backend (called once on startup).
     pub fn sync_all_steps(&mut self) {
-        for i in 0..self.tracker.steps.len() {
+        for i in 0..self.tracker.active_steps {
             self.sync_step(i);
         }
+        self.sync_num_steps();
+    }
+
+    /// Tell the backend how many steps to iterate.
+    pub fn sync_num_steps(&mut self) {
+        let n = self.tracker.active_steps as u32;
+        let _ = self.frontend.send_node_msg(
+            "tracker.sequencer",
+            legato::msg::NodeMessage::SetParam(ParamPayload {
+                param_name: "num_steps",
+                value: RtValue::U32(n),
+            }),
+        );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
 
 impl Widget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer) {
@@ -157,9 +180,9 @@ impl Widget for &mut App {
         self.tracker.render(tracker_area, buf);
 
         // --- Visualizers ---
-        if self.vis_mode != VisualizationState::Hidden {
+        if self.vis_mode != VisMode::Hidden {
             match self.vis_mode {
-                VisualizationState::Both => {
+                VisMode::Both => {
                     let [osc_area, spec_area] = Layout::default()
                         .direction(Direction::Horizontal)
                         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -167,16 +190,16 @@ impl Widget for &mut App {
                     self.oscilloscope.render_ref(osc_area, buf);
                     self.spectroscope.render_ref(spec_area, buf);
                 }
-                VisualizationState::OscOnly => self.oscilloscope.render_ref(vis_area, buf),
-                VisualizationState::SpecOnly => self.spectroscope.render_ref(vis_area, buf),
-                VisualizationState::Hidden => {}
+                VisMode::OscOnly => self.oscilloscope.render_ref(vis_area, buf),
+                VisMode::SpecOnly => self.spectroscope.render_ref(vis_area, buf),
+                VisMode::Hidden => {}
             }
         }
 
         // --- Help / status bar ---
         let step = self.tracker.current_step();
         let note = freq_to_note_display(step.freq);
-        let midi = ftom(step.freq);
+        let midi = freq_to_midi(step.freq);
         let gate = if step.gate > 0.5 { "ON" } else { "OFF" };
         let vel = (step.vel * 127.0).round() as u8;
         let col_name = match self.tracker.cursor_col {
@@ -199,6 +222,12 @@ impl Widget for &mut App {
             Span::raw(":gate "),
             Span::styled("V", Style::default().fg(Color::Cyan)),
             Span::raw(format!(":vis[{}] ", self.vis_mode.label())),
+            Span::styled("{}", Style::default().fg(Color::Cyan)),
+            Span::raw(format!(
+                ":steps[{}/{}] ",
+                self.tracker.active_steps,
+                tracker::MAX_STEPS,
+            )),
             Span::styled("Q", Style::default().fg(Color::Red)),
             Span::raw(":quit  "),
             Span::styled("│ ", Style::default().fg(Color::DarkGray)),
@@ -222,6 +251,10 @@ impl Widget for &mut App {
         Paragraph::new(help).render(help_area, buf);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Legato setup (unchanged from original)
+// ---------------------------------------------------------------------------
 
 fn setup_legato_runtime(producer: rtrb::Producer<f32>) -> LegatoFrontend {
     let graph = fs::read_to_string("../.legato").expect("Could not find legato file!");
@@ -248,6 +281,8 @@ fn setup_legato_runtime(producer: rtrb::Producer<f32>) -> LegatoFrontend {
         .set_midi_runtime(midi_rt_fe)
         .build_dsl(&graph);
 
+    dbg!(&backend);
+
     let interface = AudioInterface::default_with_config(&config);
 
     std::thread::spawn(move || {
@@ -258,11 +293,16 @@ fn setup_legato_runtime(producer: rtrb::Producer<f32>) -> LegatoFrontend {
     frontend
 }
 
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (prod, consumer) = rtrb::RingBuffer::new(48_000);
     let frontend = setup_legato_runtime(prod);
 
     let mut app = App::new(consumer, frontend);
+    // Push default step state to the backend so it's in sync from the start.
     app.sync_all_steps();
 
     ratatui::run(|terminal| {
@@ -290,10 +330,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
                         // --- Editing ---
                         KeyCode::Char('+') | KeyCode::Char('=') => {
-                            dirty = app.tracker.increment_cursor();
+                            dirty = app.tracker.increment();
                         }
                         KeyCode::Char('-') | KeyCode::Char('_') => {
-                            dirty = app.tracker.decrement_cursor();
+                            dirty = app.tracker.decrement();
                         }
                         KeyCode::Char(']') => {
                             dirty = app.tracker.octave_up();
@@ -303,6 +343,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         KeyCode::Char(' ') => {
                             dirty = app.tracker.toggle_gate();
+                        }
+
+                        // --- Step count ---
+                        KeyCode::Char('}') => {
+                            if app.tracker.grow().is_some() {
+                                app.sync_num_steps();
+                            }
+                        }
+                        KeyCode::Char('{') => {
+                            if app.tracker.shrink().is_some() {
+                                app.sync_num_steps();
+                            }
                         }
 
                         _ => {}

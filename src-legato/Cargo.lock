@@ -1003,9 +1003,9 @@ checksum = "09edd9e8b54e49e587e4f6295a7d29c3ea94d469cb40ab8ca70b288248a81db2"
 
 [[package]]
 name = "legato"
-version = "0.0.16"
+version = "0.0.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "656ada5a95d59c695b1db58b3d327953662a88732a1d235f19f1dd40094e34d8"
+checksum = "f659f604e018bef94f3b7d1c5812f1dab40368ba42c0514dbb024be68bef734f"
 dependencies = [
  "approx",
  "arc-swap",

@@ -3,13 +3,13 @@ name = "downstream-tui"
 version = "0.1.0"
 description = "A small Legato TUI application"
 authors = ["Luke <lukeweston1234@gmail.com>"]
-license = "MIT"
+license = "AGPL-3.0"
 edition = "2024"
 
 [dependencies]
 color-eyre = "0.6.3"
 crossterm = "0.29.0"
-legato = "0.0.16"
+legato = "0.0.19"
 ratatui = { version = "0.30.0", features = ["unstable-widget-ref"] }
 realfft = "3.5.0"
 rtrb = "0.3.3"
