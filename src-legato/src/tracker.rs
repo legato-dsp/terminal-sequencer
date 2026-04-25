@@ -76,15 +76,10 @@ pub fn freq_to_note_display(freq: f32) -> String {
     format!("{}{}", NOTE_NAMES[idx], octave)
 }
 
-// ---------------------------------------------------------------------------
-// Tracker state
-// ---------------------------------------------------------------------------
-
 pub struct Tracker {
     pub steps: Vec<TrackerStep>,
     pub cursor_row: usize,
     pub cursor_col: Column,
-    /// Kept in sync with cursor_row so the Table widget scrolls automatically.
     pub table_state: TableState,
 }
 
@@ -99,8 +94,6 @@ impl Tracker {
             table_state,
         }
     }
-
-    // --- Navigation ---
 
     pub fn move_up(&mut self) {
         self.cursor_row = if self.cursor_row == 0 {
@@ -240,7 +233,7 @@ impl Widget for &mut Tracker {
                     Style::default().fg(ROW_NORMAL_FG)
                 };
 
-                // Helper: highlight cell if it's under the cursor, else use row_base.
+                // Highlight cell if it's under the cursor, else use row_base.
                 let cell = |text: String, col: Column| -> Cell {
                     if is_active && cursor_col == col {
                         Cell::from(text).style(cursor_style)
@@ -277,7 +270,6 @@ impl Widget for &mut Tracker {
                     Cell::from(gate_str).style(row_base)
                 };
 
-                // Length — displayed as a 0.00-1.00 decimal
                 let len_str = format!(" {:.2} ", step.length);
 
                 Row::new(vec![
@@ -291,7 +283,6 @@ impl Widget for &mut Tracker {
             })
             .collect();
 
-        // --- Table ---
         let widths = [
             Constraint::Length(4),
             Constraint::Length(5),

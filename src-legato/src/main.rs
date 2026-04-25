@@ -30,57 +30,45 @@ mod osc;
 mod spectrum;
 mod tracker;
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 pub const RING_SIZE: usize = 4096;
 pub const DISPLAY_SAMPLES: usize = 512;
 pub const DEFAULT_STEPS: usize = 64;
 
-// ---------------------------------------------------------------------------
-// Visualizer toggle
-// ---------------------------------------------------------------------------
-
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum VisMode {
+enum VisualizationState {
     Both,
     OscOnly,
     SpecOnly,
     Hidden,
 }
 
-impl VisMode {
+impl VisualizationState {
     fn cycle(self) -> Self {
         match self {
-            VisMode::Both => VisMode::OscOnly,
-            VisMode::OscOnly => VisMode::SpecOnly,
-            VisMode::SpecOnly => VisMode::Hidden,
-            VisMode::Hidden => VisMode::Both,
+            VisualizationState::Both => VisualizationState::OscOnly,
+            VisualizationState::OscOnly => VisualizationState::SpecOnly,
+            VisualizationState::SpecOnly => VisualizationState::Hidden,
+            VisualizationState::Hidden => VisualizationState::Both,
         }
     }
 
     fn label(self) -> &'static str {
         match self {
-            VisMode::Both => "OSC+SPEC",
-            VisMode::OscOnly => "OSC",
-            VisMode::SpecOnly => "SPEC",
-            VisMode::Hidden => "OFF",
+            VisualizationState::Both => "OSC+SPEC",
+            VisualizationState::OscOnly => "OSC",
+            VisualizationState::SpecOnly => "SPEC",
+            VisualizationState::Hidden => "OFF",
         }
     }
 
     /// Height (in terminal rows) that the visualizer panel should occupy.
     fn height(self) -> u16 {
         match self {
-            VisMode::Hidden => 0,
+            VisualizationState::Hidden => 0,
             _ => 10,
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// App
-// ---------------------------------------------------------------------------
 
 struct App {
     // Audio visualizer pipeline
@@ -88,13 +76,11 @@ struct App {
     visualization_ring: VecDeque<f32>,
     oscilloscope: Oscilloscope,
     spectroscope: Spectroscope,
-
     // Legato backend handle
     frontend: LegatoFrontend,
-
     // Tracker UI state
     tracker: Tracker,
-    vis_mode: VisMode,
+    vis_mode: VisualizationState,
 }
 
 impl App {
@@ -106,11 +92,10 @@ impl App {
             spectroscope: Spectroscope::new(),
             frontend,
             tracker: Tracker::new(DEFAULT_STEPS),
-            vis_mode: VisMode::Both,
+            vis_mode: VisualizationState::Both,
         }
     }
 
-    /// Draw a frame.
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
         terminal.draw(|frame| {
             frame.render_widget(self, frame.area());
@@ -133,17 +118,13 @@ impl App {
         );
     }
 
-    /// Push all steps to the backend (called once on startup).
+    /// Push all steps to the backend
     pub fn sync_all_steps(&mut self) {
         for i in 0..self.tracker.steps.len() {
             self.sync_step(i);
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
 
 impl Widget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer) {
@@ -176,9 +157,9 @@ impl Widget for &mut App {
         self.tracker.render(tracker_area, buf);
 
         // --- Visualizers ---
-        if self.vis_mode != VisMode::Hidden {
+        if self.vis_mode != VisualizationState::Hidden {
             match self.vis_mode {
-                VisMode::Both => {
+                VisualizationState::Both => {
                     let [osc_area, spec_area] = Layout::default()
                         .direction(Direction::Horizontal)
                         .constraints([Constraint::Percentage(50), Constraint::Percentage(50)])
@@ -186,9 +167,9 @@ impl Widget for &mut App {
                     self.oscilloscope.render_ref(osc_area, buf);
                     self.spectroscope.render_ref(spec_area, buf);
                 }
-                VisMode::OscOnly => self.oscilloscope.render_ref(vis_area, buf),
-                VisMode::SpecOnly => self.spectroscope.render_ref(vis_area, buf),
-                VisMode::Hidden => {}
+                VisualizationState::OscOnly => self.oscilloscope.render_ref(vis_area, buf),
+                VisualizationState::SpecOnly => self.spectroscope.render_ref(vis_area, buf),
+                VisualizationState::Hidden => {}
             }
         }
 
@@ -242,10 +223,6 @@ impl Widget for &mut App {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Legato setup (unchanged from original)
-// ---------------------------------------------------------------------------
-
 fn setup_legato_runtime(producer: rtrb::Producer<f32>) -> LegatoFrontend {
     let graph = fs::read_to_string("../.legato").expect("Could not find legato file!");
 
@@ -281,16 +258,11 @@ fn setup_legato_runtime(producer: rtrb::Producer<f32>) -> LegatoFrontend {
     frontend
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (prod, consumer) = rtrb::RingBuffer::new(48_000);
     let frontend = setup_legato_runtime(prod);
 
     let mut app = App::new(consumer, frontend);
-    // Push default step state to the backend so it's in sync from the start.
     app.sync_all_steps();
 
     ratatui::run(|terminal| {
