@@ -31,10 +31,6 @@ mod osc;
 mod spectrum;
 mod tracker;
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
 pub const RING_SIZE: usize = 4096;
 pub const DISPLAY_SAMPLES: usize = 512;
 pub const DEFAULT_STEPS: usize = 16;
@@ -66,7 +62,6 @@ impl VisMode {
         }
     }
 
-    /// Height (in terminal rows) that the visualizer panel should occupy.
     fn height(self) -> u16 {
         match self {
             VisMode::Hidden => 0,
@@ -101,7 +96,6 @@ impl App {
         }
     }
 
-    /// Draw a frame.
     pub fn run(&mut self, terminal: &mut DefaultTerminal) -> std::io::Result<()> {
         terminal.draw(|frame| {
             frame.render_widget(self, frame.area());
@@ -124,7 +118,7 @@ impl App {
         );
     }
 
-    /// Push all *active* steps to the backend (called once on startup).
+    /// Push all steps in the current window to the backend
     pub fn sync_all_steps(&mut self) {
         for i in 0..self.tracker.active_steps {
             self.sync_step(i);
@@ -132,7 +126,7 @@ impl App {
         self.sync_num_steps();
     }
 
-    /// Tell the backend how many steps to iterate.
+    /// Tell the backend how many steps to iterate, this basically just changes the sequencer window size
     pub fn sync_num_steps(&mut self) {
         let n = self.tracker.active_steps as u32;
         let _ = self.frontend.send_node_msg(
@@ -144,10 +138,6 @@ impl App {
         );
     }
 }
-
-// ---------------------------------------------------------------------------
-// Rendering
-// ---------------------------------------------------------------------------
 
 impl Widget for &mut App {
     fn render(self, area: Rect, buf: &mut Buffer) {
@@ -163,7 +153,6 @@ impl Widget for &mut App {
         self.oscilloscope.update(samples);
         self.spectroscope.update(samples);
 
-        // --- Outer layout: tracker | visualizers | help bar ---
         let vis_h = self.vis_mode.height();
         let help_h = 1_u16;
 
@@ -176,10 +165,10 @@ impl Widget for &mut App {
             ])
             .areas(area);
 
-        // --- Tracker ---
+        // Tracker
         self.tracker.render(tracker_area, buf);
 
-        // --- Visualizers ---
+        // Visualizers
         if self.vis_mode != VisMode::Hidden {
             match self.vis_mode {
                 VisMode::Both => {
@@ -196,7 +185,7 @@ impl Widget for &mut App {
             }
         }
 
-        // --- Help / status bar ---
+        // Status bar
         let step = self.tracker.current_step();
         let note = freq_to_note_display(step.freq);
         let midi = freq_to_midi(step.freq);
@@ -293,42 +282,32 @@ fn setup_legato_runtime(producer: rtrb::Producer<f32>) -> LegatoFrontend {
     frontend
 }
 
-// ---------------------------------------------------------------------------
-// Main
-// ---------------------------------------------------------------------------
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (prod, consumer) = rtrb::RingBuffer::new(48_000);
     let frontend = setup_legato_runtime(prod);
 
     let mut app = App::new(consumer, frontend);
-    // Push default step state to the backend so it's in sync from the start.
     app.sync_all_steps();
 
     ratatui::run(|terminal| {
         loop {
             if event::poll(Duration::from_millis(16))? {
                 if let Event::Key(key) = event::read()? {
-                    // Capture the row *before* any edit (navigation doesn't trigger a sync).
                     let row_before_edit = app.tracker.cursor_row;
                     let mut dirty = false;
 
                     match key.code {
-                        // --- Quit ---
                         KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(()),
-
-                        // --- Visualizer cycle ---
                         KeyCode::Char('v') | KeyCode::Char('V') => {
                             app.vis_mode = app.vis_mode.cycle();
                         }
-
-                        // --- Navigation (no backend sync needed) ---
+                        // Navigation
                         KeyCode::Up => app.tracker.move_up(),
                         KeyCode::Down => app.tracker.move_down(),
                         KeyCode::Left => app.tracker.move_left(),
                         KeyCode::Right => app.tracker.move_right(),
 
-                        // --- Editing ---
+                        // Editing
                         KeyCode::Char('+') | KeyCode::Char('=') => {
                             dirty = app.tracker.increment();
                         }
@@ -344,8 +323,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         KeyCode::Char(' ') => {
                             dirty = app.tracker.toggle_gate();
                         }
-
-                        // --- Step count ---
+                        // Step count
                         KeyCode::Char('}') => {
                             if app.tracker.grow().is_some() {
                                 app.sync_num_steps();
@@ -361,8 +339,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
 
                     if dirty {
-                        // row_before_edit is still the correct row: edits never
-                        // move the cursor, so cursor_row hasn't changed.
                         app.sync_step(row_before_edit);
                     }
                 }

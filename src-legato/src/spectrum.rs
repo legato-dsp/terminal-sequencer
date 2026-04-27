@@ -23,7 +23,7 @@ pub struct Spectroscope {
     visualization_buffer: [f32; HOP_SIZE / 2 + 1], // Take first half up to nyquist
     // Apply the window before fft
     windowed_samples: [f32; HOP_SIZE],
-    // The spectrum we right to
+    // The spectrum we write to
     spectrum: Box<[Complex32]>,
     window: Box<[f32]>,
 }
@@ -71,6 +71,8 @@ impl Spectroscope {
     }
 }
 
+// TOOD: Is spline too heavy here? Maybe cubic of linear is fine given the resolution.
+
 fn catmull_rom(p0: f32, p1: f32, p2: f32, p3: f32, t: f32) -> f32 {
     0.5 * ((2.0 * p1)
         + (-p0 + p2) * t
@@ -106,7 +108,7 @@ impl WidgetRef for Spectroscope {
         let num_bins = self.visualization_buffer.len();
         let num_cols = area.width as usize;
 
-        // One control point per character column, log-spaced over the bin array
+        // One control point per character column, log spacing
         let control_points: Vec<f32> = (0..num_cols)
             .map(|col| {
                 let t = col as f32 / num_cols as f32;

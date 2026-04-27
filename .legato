@@ -1,8 +1,53 @@
-patch tracker(){
+patch voice(
+    attack = 30.0,
+    decay = 20.0,
+    sustain = 0.3,
+    release = 50.0,
+) {
+    in freq gate
+
     audio {
-        sine { freq: 440.0, chans: 1},
-        adsr { attack: 30.0, decay: 40.0, sustain: 0.0, release: 30.0, chans: 1 },
-        mono_fan_out { chans: 2 }
+        sine: mod,
+        sine: carrier,
+        adsr { attack: $attack, decay: $decay, sustain: $sustain, release: $release, chans: 1 },
+        mult: freq_mult,
+        mult: fm_gain { val: 800.0 },
+        add: fm_add,
+    }
+
+    control {
+        signal: ratio { name: "ratio", min: 1.0, max: 100.0, default: 1.5 }
+    }
+
+    freq >> freq_mult[0]
+
+    ratio >> freq_mult[1]
+
+    freq_mult >> mod.freq
+
+    mod >> fm_gain[0]
+
+    freq >> fm_add[0]
+    fm_gain >> fm_add[1]
+
+    fm_add >> carrier.freq
+
+    gate >> adsr.gate
+
+    carrier >> adsr[1]
+
+    { adsr }
+}
+
+
+patch tracker(){
+    patches {
+        voice {}
+    }
+
+    audio {
+        mono_fan_out { chans: 2},
+        svf { cutoff: 2400.0, q: 0.8, type: lowpass, chans: 1 }
     }
     
     control {
@@ -12,13 +57,12 @@ patch tracker(){
     
     clock >> sequencer
     
-    sequencer.gate >> adsr.gate
-    sine >> adsr[1]
-    
-    sequencer.freq >> sine
-    
-    adsr >> mono_fan_out
-    
+    sequencer.gate >> voice.gate
+    sequencer.freq >> voice.freq
+
+    voice >> svf[0]
+    svf >> mono_fan_out
+        
     { mono_fan_out }
 }   
 
@@ -26,15 +70,15 @@ patch basic_verb(){
     in audio_in
     audio {
         // Allpass structure
-        allpass: allpass_one { delay_length: 13.0, feedback: 0.2, chans: 2},
-        allpass: allpass_two { delay_length: 13.0, feedback: 0.2, chans: 2},
-        allpass: allpass_three { delay_length: 13.0, feedback: 0.2, chans: 2},
+        allpass: allpass_one { delay_length: 13.0, feedback: 0.4, chans: 2},
+        allpass: allpass_two { delay_length: 17.0, feedback: 0.4, chans: 2},
+        allpass: allpass_three { delay_length: 21.0, feedback: 0.4, chans: 2},
         // Feedback structure
         delay_write: dw1 { delay_name: "d_one", delay_length: 2000.0, chans: 2 },
         delay_read: dr1 { delay_name: "d_one", chans: 2, delay_length: [ 938, 731 ] },
         delay_read: dr2 { delay_name: "d_one", chans: 2, delay_length: [ 459, 643 ] },
         // Feedback
-        track_mixer: feedback { tracks: 2, chans_per_track: 2, gain: [0.4, 0.4] },
+        track_mixer: feedback { tracks: 2, chans_per_track: 2, gain: [0.3, 0.3] },
         // Dry wet mixer
         track_mixer: wet_dry { tracks: 3, chans_per_track: 2, gain: [0.4, 0.5, 0.5] },
     }
