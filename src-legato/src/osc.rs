@@ -72,13 +72,11 @@ fn find_trigger(samples: &[f32], threshold: f32, dampening: f32, depth: usize) -
 
     let mut armed = false;
 
-    // Only search first half so there's always DISPLAY_SAMPLES after the trigger
     for i in 0..samples.len().saturating_sub(depth + DISPLAY_SAMPLES) {
         if samples[i] < low {
             armed = true;
         }
         if armed && samples[i] >= high {
-            // Confirm `depth` consecutive samples stay above threshold
             let confirmed =
                 (1..=depth).all(|d| samples.get(i + d).map_or(false, |&s| s >= threshold));
             if confirmed {
