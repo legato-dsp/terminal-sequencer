@@ -11,12 +11,12 @@ patch voice(
         sine: carrier,
         adsr { attack: $attack, decay: $decay, sustain: $sustain, release: $release, chans: 1 },
         mult: freq_mult,
-        mult: fm_gain { val: 800.0 },
+        mult: fm_gain { val: 400.0 },
         add: fm_add,
     }
 
     control {
-        signal: ratio { name: "ratio", min: 1.0, max: 100.0, default: 1.5 }
+        signal: ratio { name: "ratio", min: 1.0, max: 100.0, default: 2.0 }
     }
 
     freq >> freq_mult[0]

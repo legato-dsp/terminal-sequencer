@@ -1,6 +1,7 @@
 #![feature(iter_collect_into)]
 
 use std::collections::VecDeque;
+use std::error::Error;
 use std::fs;
 use std::time::Duration;
 
@@ -13,7 +14,6 @@ use legato::msg::{ParamPayload, RtValue};
 use legato::{
     builder::{LegatoBuilder, Unconfigured},
     config::Config,
-    out::start_application_audio_thread_external_output,
     ports::PortBuilder,
 };
 use ratatui::DefaultTerminal;
@@ -241,11 +241,9 @@ impl Widget for &mut App {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Legato setup (unchanged from original)
-// ---------------------------------------------------------------------------
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let (prod, consumer) = rtrb::RingBuffer::new(48_000);
 
-fn setup_legato_runtime(producer: rtrb::Producer<f32>) -> LegatoFrontend {
     let graph = fs::read_to_string("../.legato").expect("Could not find legato file!");
 
     let config = Config {
@@ -270,23 +268,19 @@ fn setup_legato_runtime(producer: rtrb::Producer<f32>) -> LegatoFrontend {
         .set_midi_runtime(midi_rt_fe)
         .build_dsl(&graph);
 
-    dbg!(&backend);
-
-    let interface = AudioInterface::default_with_config(&config);
-
-    std::thread::spawn(move || {
-        start_application_audio_thread_external_output(interface, producer, backend)
-            .expect("Audio thread panic!")
-    });
-
-    frontend
-}
-
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (prod, consumer) = rtrb::RingBuffer::new(48_000);
-    let frontend = setup_legato_runtime(prod);
-
     let mut app = App::new(consumer, frontend);
+
+    #[cfg(target_os = "macos")]
+    let host = cpal::host_from_id(cpal::HostId::CoreAudio).expect("JACK host not available");
+
+    #[cfg(target_os = "linux")]
+    let host = cpal::host_from_id(cpal::HostId::Jack).expect("JACK host not available");
+
+    let interface_handle = AudioInterface::builder(&host, config)
+        .visualization_producer(prod)
+        .build(backend)
+        .expect("Failed to start audio");
+
     app.sync_all_steps();
 
     ratatui::run(|terminal| {
@@ -297,7 +291,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let mut dirty = false;
 
                     match key.code {
-                        KeyCode::Char('q') | KeyCode::Char('Q') => return Ok(()),
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            return Ok::<(), Box<dyn Error>>(());
+                        }
                         KeyCode::Char('v') | KeyCode::Char('V') => {
                             app.vis_mode = app.vis_mode.cycle();
                         }
