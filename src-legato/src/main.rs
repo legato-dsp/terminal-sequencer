@@ -242,30 +242,30 @@ impl Widget for &mut App {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let (prod, consumer) = rtrb::RingBuffer::new(48_000);
+    let (prod, consumer) = rtrb::RingBuffer::new(4096 * 4);
 
     let graph = fs::read_to_string("../.legato").expect("Could not find legato file!");
 
     let config = Config {
-        sample_rate: 44_100,
-        block_size: 4096,
+        sample_rate: 48_000,
+        block_size: 1024,
         channels: 2,
         rt_capacity: 0,
     };
 
-    let (midi_rt_fe, _writer_fe) = start_midi_thread(
-        256,
-        "my_port",
-        MidiPortKind::Index(0),
-        MidiPortKind::Index(0),
-        "my_port",
-    )
-    .unwrap();
+    // let (midi_rt_fe, _writer_fe) = start_midi_thread(
+    //     256,
+    //     "my_port",
+    //     MidiPortKind::Index(0),
+    //     MidiPortKind::Index(0),
+    //     "my_port",
+    // )
+    // .unwrap();
 
     let ports = PortBuilder::default().audio_out(2).build();
 
     let (backend, frontend) = LegatoBuilder::<Unconfigured>::new(config, ports)
-        .set_midi_runtime(midi_rt_fe)
+        // .set_midi_runtime(midi_rt_fe)
         .build_dsl(&graph);
 
     let mut app = App::new(consumer, frontend);
@@ -276,7 +276,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "linux")]
     let host = cpal::host_from_id(cpal::HostId::Jack).expect("JACK host not available");
 
-    let interface_handle = AudioInterface::builder(&host, config)
+    let _interface_handle = AudioInterface::builder(&host, config)
         .visualization_producer(prod)
         .build(backend)
         .expect("Failed to start audio");
