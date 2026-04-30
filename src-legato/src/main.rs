@@ -244,7 +244,7 @@ impl Widget for &mut App {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (prod, consumer) = rtrb::RingBuffer::new(4096 * 4);
 
-    let graph = fs::read_to_string("../.legato").expect("Could not find legato file!");
+    let graph = fs::read_to_string(".legato").expect("Could not find legato file!");
 
     let config = Config {
         sample_rate: 48_000,

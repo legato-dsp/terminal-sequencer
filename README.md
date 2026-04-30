@@ -6,6 +6,10 @@ You need a similar toolchain to the upstream Legato repo,
 e.g Rust nightly.
 
 ```sh
-cargo install
-cargo run
+# If you use direnv and flakes, just run this alias
+run-release
+# Otherwise, install a Rust nightly toolchain, and run the following...
+cargo run --release --manifest-path ./src-legato/Cargo.toml
 ```
+
+You may have to play around in main.rs to change your audio settings, i.e block size, sample rate, etc. In the future, there will be an environmental or builder configuration for this.

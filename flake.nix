@@ -18,17 +18,13 @@
     {
       devShells = forAllSystems ({ pkgs, system }: {
         default = pkgs.mkShell {
-          inputsFrom = [ 
-            legato.devShells.${system}.default 
-          ];
+          inputsFrom = [ legato.devShells.${system}.default ];
 
-          buildInputs = with pkgs; [
-            # Your project-specific additions
+          nativeBuildInputs = [
+            (pkgs.writeShellScriptBin "run-release" ''
+              exec cargo run --release --manifest-path ./src-legato/Cargo.toml "$@"
+            '')
           ];
-
-          shellHook = ''
-            echo "Environment loaded for ${system}"
-          '';
         };
       });
 
