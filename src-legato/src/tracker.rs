@@ -100,6 +100,7 @@ pub struct Tracker {
     pub cursor_col: Column,
     /// Kept in sync with cursor_row so the Table widget scrolls automatically.
     pub table_state: TableState,
+    pub bpm: f32,
 }
 
 impl Tracker {
@@ -113,6 +114,7 @@ impl Tracker {
             cursor_row: 0,
             cursor_col: Column::Note,
             table_state,
+            bpm: 120.0
         }
     }
 
